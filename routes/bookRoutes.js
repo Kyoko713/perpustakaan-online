@@ -1,62 +1,95 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
 const Book = require('../models/Book');
+const Borrow = require('../models/Borrow');
 
-// Menampilkan daftar buku
+// Konfigurasi multer
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
+});
+const upload = multer({ storage });
+
+// Halaman form tambah buku (admin)
+router.get('/tambah', (req, res) => {
+  res.render('admin/form-tambah'); // ✅ arahin ke folder admin
+});
+
+// Menampilkan daftar buku (admin home)
 router.get('/', async (req, res) => {
   try {
-    const books = await Book.find();
-    res.render('index', { books });
-  } catch (err) {
-    res.status(500).send('Error fetching books');
+    const books = await Book.find();  
+    res.render('admin/index', { books }); // ✅ render index admin
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Terjadi kesalahan saat mengambil daftar buku.");
   }
 });
 
 // Menambahkan buku baru
-router.post('/add', async (req, res) => {
-  const { title, author, year } = req.body;
-  const newBook = new Book({ title, author, year });
-  
+router.post('/tambah', upload.single('image'), async (req, res) => {
   try {
+    const newBook = new Book({
+      title: req.body.title,
+      author: req.body.author,
+      year: req.body.year,
+      synopsis: req.body.synopsis,
+      available: true,
+      imageUrl: '/uploads/' + req.file.filename
+    });
+
     await newBook.save();
-    res.redirect('/');
+    res.redirect('/admin'); // ✅ kembali ke dashboard admin
   } catch (err) {
-    res.status(500).send('Error adding book');
+    console.error(err);
+    res.status(500).send('Gagal menambahkan buku');
   }
 });
 
-// Meminjam buku
-router.post('/borrow/:id', async (req, res) => {
+// Memproses peminjaman
+router.post('/pinjam/:id', async (req, res) => {
+  const { nim, nama, kelas } = req.body;
+  const bookId = req.params.id;
+
   try {
-    await Book.findByIdAndUpdate(req.params.id, { available: false });
-    res.redirect('/');
+    await Borrow.create({ bookId, nim, nama, kelas });
+    await Book.findByIdAndUpdate(bookId, { available: false });
+    res.redirect('/admin'); // ✅ redirect ke admin
   } catch (err) {
-    res.status(500).send('Error borrowing book');
+    console.error('Gagal meminjam buku:', err);
+    res.status(500).send('Gagal meminjam buku');
   }
 });
 
 // Mengembalikan buku
-router.post('/return/:id', async (req, res) => {
+router.post('/kembali/:id', async (req, res) => {
   try {
-    await Book.findByIdAndUpdate(req.params.id, { available: true });
-    res.redirect('/');
+    const bookId = String(req.params.id);
+    const updatedBook = await Book.findByIdAndUpdate(bookId, { available: true });
+
+    if (!updatedBook) {
+      return res.status(404).send('Buku tidak ditemukan');
+    }
+
+    const deletedBorrow = await Borrow.deleteOne({ bookId });
+
+    res.redirect('/admin');
   } catch (err) {
-    res.status(500).send('Error returning book');
+    console.error('Gagal mengembalikan buku:', err);
+    res.status(500).send('Gagal mengembalikan buku');
+  }
+});
+
+// Halaman detail buku admin
+router.get('/buku/:id', async (req, res) => {
+  try {
+    const book = await Book.findById(req.params.id);
+    res.render('admin/detail', { book }); // ✅ arahkan ke views/admin/detail.ejs
+  } catch (err) {
+    res.status(500).send('Buku tidak ditemukan');
   }
 });
 
 module.exports = router;
-router.get('/dummy', async (req, res) => {
-    try {
-      await Book.insertMany([
-        { title: 'Laskar Pelangi', author: 'Andrea Hirata', year: 2005 },
-        { title: 'Negeri 5 Menara', author: 'Ahmad Fuadi', year: 2009 },
-        { title: 'Bumi', author: 'Tere Liye', year: 2014 }
-      ]);
-      res.send('Dummy data berhasil ditambahkan!');
-    } catch (err) {
-      console.error(err);
-      res.status(500).send('Gagal menambahkan dummy data.');
-    }
-  });
-  
